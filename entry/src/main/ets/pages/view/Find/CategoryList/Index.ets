@@ -1,13 +1,12 @@
 import Header from '../../../../componets/common/Header';
 import { router } from '@kit.ArkUI';
-import { ExploreItem, ExploreQuery } from '../../../../database/types/BookSourceType';
+import { ExploreItem } from '../../../../database/types/BookSourceType';
 import { ExploreRule } from '../../../../database/entities/rule';
 import RefreshComponent from '../../../../componets/common/RefreshComponent';
 import { isNetworkUrl } from '../../../../common/utils/utils';
-import axios, { AxiosResponse } from '@ohos/axios';
 import noFind from '../../../../componets/common/noFind';
 import { CardItem } from '../components/CardItem';
-import CommonConstants from '../../../../common/constants/CommonConstants';
+import { ExploredBook, exploreBooks } from '../../../../common/utils/OnlineBookSource';
 import { ThemeColorItem, ThemeItem } from '../../../../common/model/Theme';
 import { ThemeStorageKey } from '../../../../common/constants/Theme';
 
@@ -55,31 +54,19 @@ struct CateGoryListPage {
     if (!isNetworkUrl(url)) {
       url = this.bookSourceUrl + url
     }
-    const exploreQuery: ExploreQuery = {
-      url,
-      bookList: this.exploreRule.bookList,
-      pageSize: this.pageSize,
-      name: this.exploreRule.name,
-      author: this.exploreRule.author,
-      intro: this.exploreRule.intro,
-      kind: this.exploreRule.kind,
-      lastChapter: this.exploreRule.lastChapter,
-      bookUrl: this.exploreRule.bookUrl,
-      coverUrl: this.exploreRule.coverUrl,
-      wordCount: this.exploreRule.wordCount
-    }
     if (this.pageNum * this.pageSize - this.bookList.length >= this.pageSize * 2 && !this.startLoading) {
       return
     }
     this.loading = true
     try {
-      const res: AxiosResponse = await axios.post(CommonConstants.BASE_URL + '/common/analysisRules', exploreQuery)
-      console.info('TagInfo, 解析内容：', JSON.stringify(res.data))
-      const bookList = (res.data as ExploreRule[]).map(item => {
-        if (item.coverUrl && !isNetworkUrl(item.coverUrl)) {
-          item.coverUrl = this.bookSourceUrl + item.coverUrl
-        }
-        return item
+      // 本地引擎解析（替代已下线远程服务）
+      const books = await exploreBooks(this.exploreRule, url, this.pageSize)
+      const bookList = books.map((b: ExploredBook): ExploreRule => {
+        return {
+          name: b.name, author: b.author, intro: b.intro, kind: b.kind,
+          wordCount: b.wordCount, lastChapter: b.lastChapter,
+          bookUrl: b.bookUrl, coverUrl: b.coverUrl
+        } as ExploreRule
       })
       if (this.pageNum === 1) {
         this.bookList = bookList
@@ -88,7 +75,7 @@ struct CateGoryListPage {
       }
       this.loading = false
     } catch (err) {
-      console.log('TagInfo 请求失败：', JSON.stringify(err.message));
+      console.log('TagInfo 本地解析失败：', err.message);
       this.loading = false
     }
   }

@@ -7,6 +7,7 @@ import { picker } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { buffer } from '@kit.ArkTS'
 import { Books } from '../../database/entities/Books';
+import { BookSource } from '../../database/entities/BookSource';
 import booksUtil from './booksUtils';
 
 let context = getContext(this) as common.UIAbilityContext;
@@ -127,19 +128,38 @@ export class FileHandler {
       const documentSelectResult: Array<string> = await documentViewPicker.select(documentSelectOptions)
       const pathUrl = documentSelectResult[0];
       console.info('文件目录：' + pathUrl);
-      let file = fs.openSync(pathUrl, fs.OpenMode.READ_WRITE);
-      let buf = new ArrayBuffer(40960000);
-      fs.readSync(file.fd, buf);
+      // 按文件实际大小读取，避免固定超大缓冲区导致内存溢出
+      let file = fs.openSync(pathUrl, fs.OpenMode.READ_ONLY);
+      let stat = fs.statSync(file.fd);
+      let buf = new ArrayBuffer(stat.size);
+      let readLen: number = fs.readSync(file.fd, buf);
       fs.closeSync(file);
-      let uint8View = new Uint8Array(buf);
-      // 设置编码格式为“utf-8”
-      let textDecoder = util.TextDecoder.create('utf-8', { ignoreBOM: true });
-      // 解码输后获取对应文本
-      let readString = textDecoder.decodeWithStream(uint8View, { stream: false });
-      console.log('读取的数据内容：' + readString);
-      return JSON.parse(readString)
+      let readString = buffer.from(buf, 0, readLen).toString('utf-8');
+      // 去除 UTF-8 BOM
+      if (readString.charCodeAt(0) === 0xFEFF) {
+        readString = readString.slice(1);
+      }
+      const parsed: BookSource[] = JSON.parse(readString) as BookSource[];
+      if (!Array.isArray(parsed)) {
+        showMessage('文件格式不正确：书源应为 JSON 数组');
+        return Promise.reject(new Error('not array'));
+      }
+      // 过滤缺少关键字段的无效条目，避免后续渲染与入库崩溃
+      const validList: BookSource[] = parsed.filter((o: BookSource): boolean => {
+        return !!o && typeof o.bookSourceUrl === 'string' && o.bookSourceUrl.length > 0 &&
+          typeof o.bookSourceName === 'string' && o.bookSourceName.length > 0;
+      });
+      if (validList.length === 0) {
+        showMessage('未解析到有效书源，请确认文件是小说书源而非RSS订阅源');
+        return Promise.reject(new Error('no valid source'));
+      }
+      if (validList.length < parsed.length) {
+        showMessage(`已跳过 ${parsed.length - validList.length} 条无效书源`);
+      }
+      return validList
     } catch (err) {
       console.error(`读取失败：${err}`);
+      showMessage('书源文件解析失败，请检查 JSON 格式');
       return Promise.reject(err)
     }
   }

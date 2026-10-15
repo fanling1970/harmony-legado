@@ -223,11 +223,11 @@ struct AddSourcePage {
           value: this.formModel.bookSourceName,
           label: '名称',
           isLength: true,
-          maxLength: 5,
+          maxLength: 20,
           required: true,
           onChange: (value: string) => {
-            if (value?.length >= 6) {
-              this.formModel.bookSourceName = value.slice(0, -1)
+            if (value?.length > 20) {
+              this.formModel.bookSourceName = value.slice(0, 20)
               return
             }
             this.formModel.bookSourceName = value

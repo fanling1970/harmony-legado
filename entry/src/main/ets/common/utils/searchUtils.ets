@@ -70,15 +70,21 @@ class searchUtils{
     let parse = parseURLUtil.processRuleUrl();
     if (typeof parse !== 'string') {
       urls = parse.url
-      // body = await requestUtil.requestHtml(parse)
+      // 本地抓取：支持 charset/POST/GET 与降级重试
+      try {
+        body = await requestUtil.requestHtml(parse)
+      } catch (e) {
+        console.error('搜索抓取失败：' + JSON.stringify(e))
+        return []
+      }
     } else {
       urls = parse
-      // let res = await requestUtil.requestUrlHtml(parse)
-      // if (res === undefined) return []
-      // if (networkUtil.checkContentType(res)) {
-      //   console.log('Json数据')
-      // }
-      // body = res
+      try {
+        body = await requestUtil.requestUrlHtml(parse)
+      } catch (e) {
+        console.error('搜索抓取失败：' + JSON.stringify(e))
+        return []
+      }
     }
     if (bookSource.ruleSearch) {
       xmlAnalysis.init(new XmlAnalysisData({

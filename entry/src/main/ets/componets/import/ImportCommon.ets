@@ -7,11 +7,9 @@
 import SideBar from '../common/SideBar';
 import { showMessage } from '../common/promptShow';
 import Score from '../common/Score';
-import Tag from '../common/Tag';
 import BookSourceDao from '../../database/dao/BookSourceDao';
 import { BookSource, GroupList, SOURCE_GROUP_MAP } from '../../database/entities/BookSource';
 import SourceGroup from '../ui/SourceGroup';
-import text from '@ohos.graphics.text';
 import { ThemeItem } from '../../common/model/Theme';
 import { ThemeStorageKey } from '../../common/constants/Theme';
 
@@ -19,13 +17,14 @@ import { ThemeStorageKey } from '../../common/constants/Theme';
 export default struct ImportCommon {
   @StorageProp('pathBookSource') pathBookSource: string = ''
   @State localSourceList: BookSource[] = []
-  @Prop sourceList: BookSource[] = []
+  @Link sourceList: BookSource[]
   @Link show: boolean;
   @State groupList: GroupList[] = []
   @State currentIndex: number = 0
   @State insertMap: Record<string, boolean> = {}
   @State alreadyNameMap: Record<string, boolean> = {}
   @State updateNameMap: Record<string, boolean> = {}
+  @State selectedCount: number = 0
   @State fullActive: boolean = false
   @State waringActive: boolean = false
   @StorageLink('refreshCount') refreshCount: number = 0
@@ -48,37 +47,42 @@ export default struct ImportCommon {
 
   getGroupList() {
     const groupMap: Record<string, GroupList> = {};
+    // 本地已有书源按 URL 建索引，避免 O(n²) 嵌套循环导致大文件卡顿
+    const localMap: Map<string, BookSource> = new Map();
+    this.localSourceList.forEach((local: BookSource) => {
+      if (local && local.bookSourceUrl) {
+        localMap.set(local.bookSourceUrl, local)
+      }
+    })
     this.sourceList.forEach((item: BookSource) => {
+      if (!item || !item.bookSourceUrl) {
+        return
+      }
       const title = item.bookSourceGroup;
-      const bookSourceName = item.bookSourceName;
       if (item.bookSourceType >= 3){
         item.bookSourceType = 0 //SOURCE_GROUP_MAP中未有3的情况,会出现数组越界
       }
-      if (title) {
-        // 如果groupMap中还没有这个group，则创建一个新的GroupList对象
-        if (!groupMap[title]) {
-          groupMap[title] = { title: title, list: [] };
-        }
-        // 向当前group的list中添加BookSource对象
-        groupMap[title].list.push(item);
+      const groupTitle = title || '其他'
+      // 无分组书源归入"其他"，避免整条记录不显示
+      if (!groupMap[groupTitle]) {
+        groupMap[groupTitle] = { title: groupTitle, list: [] };
       }
-      for (let i = 0; i < this.localSourceList.length; i++) {
-        const localItem = this.localSourceList[i];
-        if (localItem.bookSourceUrl === item.bookSourceUrl) {
-          this.alreadyNameMap[item.bookSourceUrl] = true
-          if (
-            localItem.bookSourceName !== item.bookSourceName ||
-            localItem.searchUrl !== item.searchUrl ||
-            localItem.ruleSearch?.bookList !== item.ruleSearch?.bookList ||
-            localItem.ruleContent?.content !== item.ruleContent?.content
-          ) {
-            this.insertMap[item.bookSourceUrl] = true
-            this.updateNameMap[item.bookSourceUrl] = true
-          }
-          break;
+      groupMap[groupTitle].list.push(item);
+      const localItem = localMap.get(item.bookSourceUrl)
+      if (localItem) {
+        this.alreadyNameMap[item.bookSourceUrl] = true
+        if (
+          localItem.bookSourceName !== item.bookSourceName ||
+          localItem.searchUrl !== item.searchUrl ||
+          localItem.ruleSearch?.bookList !== item.ruleSearch?.bookList ||
+          localItem.ruleContent?.content !== item.ruleContent?.content
+        ) {
+          this.insertMap[item.bookSourceUrl] = true
+          this.updateNameMap[item.bookSourceUrl] = true
         }
       }
     })
+    this.selectedCount = Object.values(this.insertMap).filter(o => o).length
     this.groupList = Object.values(groupMap);
   }
 
@@ -94,9 +98,20 @@ export default struct ImportCommon {
   }
 
   resetState() {
-    this.sourceList = []
+    this.sourceList.splice(0, this.sourceList.length)
     this.groupList = []
     this.currentIndex = 0
+  }
+
+  isGroupAllSelected(list: BookSource[]): boolean {
+    if (list.length === 0) {
+      return false
+    }
+    return list.every((bs: BookSource): boolean => this.insertMap[bs.bookSourceUrl] ?? false)
+  }
+
+  refreshSelectedCount() {
+    this.selectedCount = Object.values(this.insertMap).filter(o => o).length
   }
 
   getSourceGroupAll () {
@@ -119,14 +134,14 @@ export default struct ImportCommon {
         List({ scroller: this.secondScroll }) {
           ForEach(this.groupList, (item: GroupList, index: number) => {
             ListItemGroup({
-              header: this.classifyHeader(`${item.title}`, ` (${item.list.length})` , index, item.list[0].bookSourceType || 0),
+              header: this.classifyHeader(`${item.title}`, ` (${item.list.length})` , index, item.list[0].bookSourceType || 0, item.list),
               space: 0
             }) {
               ForEach(item.list, (bookSource: BookSource, j: number) => {
                 this.CourseItem(bookSource, index, j)
-              })
+              }, (bookSource: BookSource, j: number) => `${j}-${bookSource.bookSourceUrl}`)
             }
-          })
+          }, (item: GroupList, index: number) => `${index}-${item.title}`)
         }
         .padding({ right: 20 })
         .sticky(StickyStyle.Header)
@@ -141,16 +156,20 @@ export default struct ImportCommon {
         Checkbox()
           .select(this.fullActive)
           .selectedColor(this.theme.mainColor)
-          .onChange((val: boolean) => {
-            this.fullActive = val
+          .onClick(() => {
+            const target = !this.fullActive
+            this.fullActive = target
             this.sourceList.forEach((item: BookSource) => {
-              this.insertMap[item.bookSourceUrl] = val
+              if (item && item.bookSourceUrl) {
+                this.insertMap[item.bookSourceUrl] = target
+              }
             })
+            this.refreshSelectedCount()
           })
 
         Text() {
           Span('全选（')
-          Span(Object.values(this.insertMap).filter(o => o).length + '')
+          Span(this.selectedCount + '')
             .fontColor(this.theme.mainColor)
           Span(`/${this.sourceList.length})`)
         }
@@ -233,7 +252,7 @@ export default struct ImportCommon {
   }
 
   @Builder
-  classifyHeader(title: string, num: string, index: number, groupIndex: number) {
+  classifyHeader(title: string, num: string, index: number, groupIndex: number, list: BookSource[]) {
     Row() {
       Text(title + num)
         .textAlign(TextAlign.Start)
@@ -265,9 +284,17 @@ export default struct ImportCommon {
         })
       }
 
-      CheckboxGroup({ group: 'checkboxGroup' + index })
-        .checkboxShape(CheckBoxShape.CIRCLE)
+      Checkbox()
+        .select(this.isGroupAllSelected(list))
+        .shape(CheckBoxShape.CIRCLE)
         .selectedColor(this.theme.mainColor)
+        .onClick(() => {
+          const target = !this.isGroupAllSelected(list)
+          list.forEach((bs: BookSource) => {
+            this.insertMap[bs.bookSourceUrl] = target
+          })
+          this.refreshSelectedCount()
+        })
     }
     .alignItems(VerticalAlign.Center)
     .padding({ right: 16 })
@@ -283,17 +310,16 @@ export default struct ImportCommon {
           .lineHeight(24)
           .fontWeight(FontWeight.Medium)
 
-        if (i % 2 === 0) {
-          Tag({ text: '正在使用', color: '#24B277', bgColor: '#1F24B277' })
-        }
-
         Blank()
 
-        Checkbox({ name: 'checkbox' + j, group: 'checkboxGroup' + i })
+        Checkbox()
           .select(this.insertMap[item.bookSourceUrl] ?? false)
+          .shape(CheckBoxShape.CIRCLE)
           .selectedColor(this.theme.mainColor)
-          .onChange((val: boolean) => {
-            this.insertMap[item.bookSourceUrl] = val
+          .onClick(() => {
+            const target = !(this.insertMap[item.bookSourceUrl] ?? false)
+            this.insertMap[item.bookSourceUrl] = target
+            this.refreshSelectedCount()
           })
       }
       .width('100%')

@@ -4,15 +4,14 @@
  * @className: BookFind
  * 发现公用书籍展示组件
  */
-import axios, { AxiosResponse, AxiosError } from '@ohos/axios'
 import { isNetworkUrl } from '../../../../common/utils/utils'
 import noFind from '../../../../componets/common/noFind'
 import { ExploreRule } from '../../../../database/entities/rule'
-import { ExploreItem, ExploreQuery } from '../../../../database/types/BookSourceType'
+import { ExploreItem } from '../../../../database/types/BookSourceType'
 import mayAlsoLike from '../mayAlsoLike'
 import { CardItem } from './CardItem'
 import { router } from '@kit.ArkUI'
-import CommonConstants from '../../../../common/constants/CommonConstants';
+import { ExploredBook, exploreBooks } from '../../../../common/utils/OnlineBookSource';
 import { ThemeItem } from '../../../../common/model/Theme'
 import { ThemeStorageKey } from '../../../../common/constants/Theme'
 
@@ -41,31 +40,19 @@ export default struct BookFindContent {
     if (!isNetworkUrl(url)) {
       url = this.bookSourceUrl + url
     }
-    const exploreQuery: ExploreQuery = {
-      url,
-      bookList: this.exploreRule.bookList,
-      pageSize: 3,
-      name: this.exploreRule.name,
-      author: this.exploreRule.author,
-      intro: this.exploreRule.intro,
-      kind: this.exploreRule.kind,
-      lastChapter: this.exploreRule.lastChapter,
-      bookUrl: this.exploreRule.bookUrl,
-      coverUrl: this.exploreRule.coverUrl,
-      wordCount: this.exploreRule.wordCount
-    }
-    axios.post(CommonConstants.BASE_URL + '/common/analysisRules', exploreQuery).then((res: AxiosResponse) => {
-      console.info('TagInfo, 解析内容：', JSON.stringify(res.data))
-      this.bookList = (res.data as ExploreRule[]).map(item => {
-        if (item.coverUrl && !isNetworkUrl(item.coverUrl)) {
-          item.coverUrl = this.bookSourceUrl + item.coverUrl
-        }
-        return item
+    // 本地引擎解析（替代已下线远程服务）
+    exploreBooks(this.exploreRule, url, 3).then((books: ExploredBook[]) => {
+      this.bookList = books.map((b: ExploredBook): ExploreRule => {
+        return {
+          name: b.name, author: b.author, intro: b.intro, kind: b.kind,
+          wordCount: b.wordCount, lastChapter: b.lastChapter,
+          bookUrl: b.bookUrl, coverUrl: b.coverUrl
+        } as ExploreRule
       })
       this.loading = false
       this.errorExplore = false
-    }).catch((err: AxiosError) => {
-      console.log('TagInfo 请求失败：', JSON.stringify(err.message));
+    }).catch((err: Error) => {
+      console.log('TagInfo 本地解析失败：', err?.message);
       this.loading = false
       this.errorExplore = true
     })

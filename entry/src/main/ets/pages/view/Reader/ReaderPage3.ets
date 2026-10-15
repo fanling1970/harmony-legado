@@ -13,6 +13,7 @@ import { Books } from '../../../database/entities/Books';
 import { WindowAbility } from '../../../entryability/WindowAbility';
 import BasicDataSource from '../../../common/LazyIDataSource/BasicDataSource';
 import BrightnessUtil from '../../../../common/utils/BrightnessUtil';
+import { TtsManager } from '../../../common/utils/TtsManager';
 
 interface ParamsObj {
   bookData: Books,
@@ -51,6 +52,16 @@ struct ReaderPage3 {
   readerComponentController: readerCore.ReaderComponentController = new readerCore.ReaderComponentController();
   //阅读器设置
   @State isShowCatalogDialog: boolean = false // 目录弹窗
+  @State isTtsPlaying: boolean = false // 朗读是否进行中
+  @State ttsAutoNext: boolean = true // 本章读完自动朗读下一章
+  @State curPageOffset: number = 0 // 当前页在本章内的页码（来自 pageShow）
+  private tts: TtsManager = TtsManager.getInstance()
+  private ttsCpp: number = 800 // 估算每页字符数
+  private ttsStartChars: number = 0 // 本次朗读的起始字符偏移
+  private ttsChapterLen: number = 0 // 本章纯文本总长
+  private ttsNavigating: boolean = false // 程序化翻页保护窗口内不视为手动翻页
+  private ttsCurResourceIndex: number = -1 // 当前朗读会话所属章节
+  private ttsFlipTimer: number = -1 // 手动翻页续读防抖计时器
   @State readerSetting: readerCore.ReaderSetting = {
     fontName: '系统字体',
     fontPath: '',
@@ -88,6 +99,16 @@ struct ReaderPage3 {
     }
     this.registerScreenDensityChange();
     this.registerListener();
+    // 朗读回调：本章播完自动下一章；播放状态同步 UI
+    this.tts.onChapterEnd = () => {
+      this.handleTtsChapterEnd();
+    };
+    this.tts.onStateChange = (playing: boolean) => {
+      this.isTtsPlaying = playing;
+    };
+    this.tts.onProgress = (spoken: number) => {
+      this.syncPageWithTts(this.ttsStartChars + spoken);
+    };
     //  进入阅读页面后隐藏系统状态栏
     WindowAbility.getInstance().toggleWindowSystemBar([], this.getUIContext().getHostContext());
     let temp = router.getParams() as ParamsObj
@@ -152,6 +173,22 @@ struct ReaderPage3 {
   private registerListener(): void {
     this.readerComponentController.on('pageShow', (data: readerCore.PageDataInfo): void => {
       this.bookData.localBookDurChapterPos = data;
+      const prevOffset = this.curPageOffset;
+      this.curPageOffset = data.pageOffset ?? this.curPageOffset;
+      hilog.info(0x0000, 'ttsdbg',
+        `pageShow offset=${data.pageOffset} resIdx=${data.resourceIndex} start=${data.startDomPos}`);
+      // 朗读中切换到其他章节：停止朗读
+      if (this.tts.isSpeaking() && data.resourceIndex !== this.ttsCurResourceIndex) {
+        this.tts.stop();
+      } else if (this.curPageOffset !== prevOffset && this.tts.isSpeaking() && !this.ttsNavigating) {
+        // 手动翻页：停止当前播报，防抖后从新页继续朗读
+        this.tts.stop();
+        clearTimeout(this.ttsFlipTimer);
+        this.ttsFlipTimer = setTimeout(() => {
+          this.speakChapter(this.ttsCurResourceIndex);
+        }, 500);
+        promptAction.showToast({ message: '从当前页继续朗读' });
+      }
       this.bookData.durChapterTitle = this.CatalogList.getData(this.bookData.durChapterIndex).catalogName;
       this.bookData.totalChapterNum = this.CatalogList.totalCount();
       // 保存书籍数据。
@@ -180,6 +217,13 @@ struct ReaderPage3 {
     this.readerComponentController.off('pageShow');
     this.readerComponentController.off('resourceRequest');
     this.readerComponentController.releaseBook();
+    // 离开阅读页时停止朗读
+    if (this.ttsFlipTimer !== -1) {
+      clearTimeout(this.ttsFlipTimer);
+      this.ttsFlipTimer = -1;
+    }
+    this.ttsCurResourceIndex = -1;
+    this.tts.stop();
   }
 
   build() {
@@ -187,7 +231,11 @@ struct ReaderPage3 {
       ReadPageComponent({
         controller: this.readerComponentController,
         readerCallback: (err: BusinessError, data: readerCore.ReaderComponentController) => {
-          this.readerComponentController = data;
+          // controller 实例被替换时，需在新实例上重新注册页事件监听，否则 pageShow 失效
+          if (data && data !== this.readerComponentController) {
+            this.readerComponentController = data;
+            this.registerListener();
+          }
         }
       }).width('100%').height('100%')
 
@@ -502,6 +550,9 @@ struct ReaderPage3 {
                       }
                       this.readerComponentController.setPageConfig(this.readerSetting);
                     })
+                  Text('朗读自动续章')
+                    .fontColor(this.colorMode == 0 ? 'rgba(248, 249, 250, 1)' : 'rgba(19, 19, 19, 1.00)')
+                  Toggle({ type: ToggleType.Switch, isOn: $$this.ttsAutoNext })
                   // Button('更多设置')
                 }
               }.padding({
@@ -532,18 +583,21 @@ struct ReaderPage3 {
                 })
               }
 
-              //todo:听书功能开发
-              /*              GridItem() {
-                              Column() {
-                                Image($r("app.media.listen")).width(24)
-                                Text("听书")
-                              }
-                            }
-                            .bindContentCover($$this.isShowListen, this.BookListen(), {
-                              modalTransition: ModalTransition.DEFAULT, backgroundColor: "rgba(51, 106, 128, 0.75)"
-                            }).onClick(() => {
-                              this.isShowListen = true
-                            })*/
+              //朗读（系统离线语音合成）
+              GridItem() {
+                Column() {
+                  Image($r("app.media.listen"))
+                    .width(24)
+                    .fillColor(this.isTtsPlaying ? '#ff6600' :
+                      (this.colorMode == 0 ? 'rgba(248, 249, 250, 1)' : 'rgba(19, 19, 19, 1.00)'))
+                  Text(this.isTtsPlaying ? "停止" : "朗读")
+                    .fontColor(this.isTtsPlaying ? '#ff6600' :
+                      (this.colorMode == 0 ? 'rgba(248, 249, 250, 1)' : 'rgba(19, 19, 19, 1.00)'))
+                }
+                .onClick(() => {
+                  this.toggleTts()
+                })
+              }
 
               GridItem() {
                 Column() {
@@ -579,7 +633,7 @@ struct ReaderPage3 {
                   this.isShowContentSetting = !this.isShowContentSetting
                 })
               }
-            }.columnsTemplate("1fr 1fr 1fr").width("100%").height(60)
+            }.columnsTemplate("1fr 1fr 1fr 1fr").width("100%").height(60)
           }
           .backgroundColor(this.colorMode == 0 ? '#1F1F1F' : 'rgba(248, 249, 250, 1)')
           .transition(TransitionEffect.move(TransitionEdge.BOTTOM).animation({ duration: 500 }))
@@ -741,6 +795,170 @@ struct ReaderPage3 {
   pageTransition() {
     PageTransitionEnter({ duration: 0, curve: Curve.Sharp });
     PageTransitionExit({ duration: 0, curve: Curve.Sharp });
+  }
+
+  /**
+   * 估算每页可容纳的字符数（按字号、行距与视口推算，含排版留白系数）
+   */
+  private charsPerPageEstimate(): number {
+    const fs = this.readerSetting.fontSize > 0 ? this.readerSetting.fontSize : 18;
+    const lh = this.readerSetting.lineHeight > 0 ? this.readerSetting.lineHeight : 1.9;
+    const w = this.readerSetting.viewPortWidth > 0 ? this.readerSetting.viewPortWidth : this.windowWidth;
+    const h = this.readerSetting.viewPortHeight > 0 ? this.readerSetting.viewPortHeight : this.windowHeight;
+    if (w <= 0 || h <= 0) {
+      return 800;
+    }
+    const charsPerLine = Math.floor(w / fs);
+    const linesPerPage = Math.floor(h / (fs * lh));
+    const cpp = Math.floor(charsPerLine * linesPerPage * 0.85);
+    return cpp > 100 ? cpp : 400;
+  }
+
+  /**
+   * 读取指定章节的纯文本正文（供朗读使用）
+   * bookParser 返回的是排版用的富文本字符串，这里剥离标签并还原常见实体
+   */
+  private async getChapterPlainText(resourceIndex: number): Promise<string> {
+    try {
+      const raw = await this.BookHandler?.getSpineItemContent(resourceIndex);
+      if (!raw) {
+        return '';
+      }
+      return raw
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<\/p>/gi, '\n')
+        .replace(/<[^>]+>/g, '')
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/&amp;/gi, '&')
+        .replace(/&lt;/gi, '<')
+        .replace(/&gt;/gi, '>')
+        .replace(/&quot;/gi, '"')
+        .replace(/&#39;/gi, "'")
+        .replace(/[ \t]+\n/g, '\n')
+        .trim();
+    } catch (e) {
+      hilog.error(0x0000, 'testTag', 'getChapterPlainText failed: ' + JSON.stringify(e));
+      return '';
+    }
+  }
+
+  /**
+   * 朗读当前页开始的章节内容：从当前页码估算起始字符偏移，并对齐到段落开头
+   */
+  private async speakChapter(resourceIndex: number): Promise<boolean> {
+    const full = await this.getChapterPlainText(resourceIndex);
+    if (!full) {
+      promptAction.showToast({ message: '本章没有可朗读的内容' });
+      this.tts.stop();
+      return false;
+    }
+    this.ttsCpp = this.charsPerPageEstimate();
+    this.ttsChapterLen = full.length;
+    this.ttsCurResourceIndex = resourceIndex;
+    let startChars = this.curPageOffset * this.ttsCpp;
+    if (startChars >= full.length) {
+      startChars = 0; // 页码信息异常时回退为整章朗读
+    }
+    // 向前对齐到段落开头，避免半句开始
+    const paraStart = full.lastIndexOf('\n', startChars);
+    if (paraStart > 0) {
+      startChars = paraStart + 1;
+    }
+    this.ttsStartChars = startChars;
+    const text = full.slice(startChars);
+    return await this.tts.speak(text);
+  }
+
+  /**
+   * 朗读进度驱动翻页：已读字数超过当前页应显示的字数时，翻到对应页
+   */
+  private syncPageWithTts(spokenInChapter: number) {
+    if (!this.tts.isSpeaking() || this.ttsChapterLen <= 0) {
+      return;
+    }
+    // 本章最后一句不翻页，章节切换交给 onChapterEnd 处理
+    if (spokenInChapter >= this.ttsChapterLen) {
+      return;
+    }
+    const targetPage = Math.floor(spokenInChapter / this.ttsCpp);
+    let flips = targetPage - this.curPageOffset;
+    if (flips <= 0) {
+      return;
+    }
+    if (flips > 3) {
+      flips = 3; // 防御：估算偏差过大时限制连翻页数
+    }
+    this.ttsNavigating = true;
+    for (let i = 0; i < flips; i++) {
+      try {
+        this.readerComponentController.flipPage(true);
+      } catch (e) {
+        hilog.error(0x0000, 'testTag', 'tts flipPage failed: ' + JSON.stringify(e));
+        break;
+      }
+    }
+    setTimeout(() => {
+      this.ttsNavigating = false;
+    }, 800);
+  }
+
+  /**
+   * 获取当前章节对应的书脊索引
+   */
+  private currentResourceIndex(): number {
+    const idx = this.bookData.durChapterIndex ?? 0;
+    const catalog = this.CatalogList.getData(idx);
+    return catalog ? this.getResourceItemByCatalog(catalog).index : 0;
+  }
+
+  /**
+   * 朗读开关：未播放则从当前页开始，播放中则停止
+   */
+  async toggleTts() {
+    if (this.ttsFlipTimer !== -1) {
+      clearTimeout(this.ttsFlipTimer);
+      this.ttsFlipTimer = -1;
+    }
+    if (this.tts.isSpeaking()) {
+      this.tts.stop();
+      this.ttsCurResourceIndex = -1;
+      promptAction.showToast({ message: '已停止朗读' });
+      return;
+    }
+    this.isTtsPlaying = true;
+    const ok = await this.speakChapter(this.currentResourceIndex());
+    if (!ok) {
+      this.isTtsPlaying = false;
+    }
+  }
+
+  /**
+   * 本章朗读结束后按设置自动朗读下一章
+   */
+  private async handleTtsChapterEnd() {
+    if (!this.ttsAutoNext) {
+      this.isTtsPlaying = false;
+      return;
+    }
+    const total = this.CatalogList.totalCount();
+    if (total <= 0 || (this.bookData.durChapterIndex ?? 0) >= total - 1) {
+      this.isTtsPlaying = false;
+      promptAction.showToast({ message: '已朗读到最后一章' });
+      return;
+    }
+    this.bookData.durChapterIndex = (this.bookData.durChapterIndex ?? 0) + 1;
+    const nextCatalog = this.CatalogList.getData(this.bookData.durChapterIndex);
+    if (!nextCatalog) {
+      this.isTtsPlaying = false;
+      return;
+    }
+    this.ttsCurResourceIndex = this.getResourceItemByCatalog(nextCatalog).index;
+    this.curPageOffset = 0; // 新章节从第一页开始
+    this.jumpToCatalogItem(nextCatalog);
+    const ok = await this.speakChapter(this.ttsCurResourceIndex);
+    if (!ok) {
+      this.isTtsPlaying = false;
+    }
   }
 
   /**

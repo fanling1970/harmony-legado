@@ -60,10 +60,18 @@ struct BookSourcePage {
       // }
       const res: AxiosResponse = await axios
         .get(url ?? 'https://node.wisdoms.xin/static/file/20240704/sy.json');
-      this.sourceList = res.data;
+      const data = res.data as BookSource[]
+      if (!Array.isArray(data) || data.length === 0) {
+        showMessage('未获取到有效书源数据')
+        return
+      }
+      this.sourceList = data.filter((o: BookSource): boolean => {
+        return !!o && typeof o.bookSourceUrl === 'string' && typeof o.bookSourceName === 'string';
+      });
       this.isShowImport = true;
     } catch (err) {
       console.error('错误 ' + err);
+      showMessage('粘贴导入失败，请检查链接是否可访问')
     }
   }
 
@@ -88,6 +96,10 @@ struct BookSourcePage {
                     .then((res: BookSource[]) => {
                       this.sourceList = res;
                       this.isShowImport = true
+                    })
+                    .catch((err: Error) => {
+                      // 用户取消选择或解析失败时静默处理，避免未捕获异常闪退
+                      console.error('本地导入失败：' + err?.message)
                     })
                   break;
                 case 2:

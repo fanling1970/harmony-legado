@@ -27,6 +27,14 @@ import addBookTypeDialog from '../../../componets/common/addBookTypeDialog'
 import rssSourcesUtils from '../../../common/utils/rssSourcesUtils'
 import dialogTitleFuction from '../../../componets/common/dialogTitleFuction'
 
+// 导入文件类型探测用的宽松结构
+interface ImportProbe {
+  sourceUrl?: string
+  sourceName?: string
+  bookSourceUrl?: string
+  bookSourceName?: string
+}
+
 @Component
 export default struct SubscriptionIndex {
   @State isShowImport: boolean = false
@@ -403,12 +411,41 @@ export default struct SubscriptionIndex {
   }
 
   async localImport() {
-    let FileResult = await FileHandler.documentPickerFile(1, ['.json'])
-    FileHandler.ReadJSONFile(FileResult[0]).then(result => {
-      // console.log('result:' + result)
+    try {
+      const FileResult = await FileHandler.documentPickerFile(1, ['.json'])
+      const result = await FileHandler.ReadJSONFile(FileResult[0])
+      if (!result) {
+        showMessage('读取文件失败')
+        return
+      }
+      const parsed = JSON.parse(result) as ImportProbe[]
+      if (!Array.isArray(parsed) || parsed.length === 0) {
+        showMessage('文件内容为空或不是数组')
+        return
+      }
+      const probe = parsed[0]
+      // 小说书源文件误入订阅源入口的拦截：字段结构完全不同，导入后名称为空且不可用
+      if (probe && typeof probe.bookSourceUrl === 'string' && typeof probe.sourceUrl !== 'string') {
+        showMessage('这是小说书源文件，请到【发现 → 书源管理 → 本地导入】添加')
+        return
+      }
+      const valid = parsed.filter((o: ImportProbe): boolean => {
+        return !!o && typeof o.sourceUrl === 'string' && o.sourceUrl.length > 0 &&
+          typeof o.sourceName === 'string' && o.sourceName.length > 0;
+      })
+      if (valid.length === 0) {
+        showMessage('未解析到有效订阅源，请确认文件是RSS订阅源')
+        return
+      }
+      if (valid.length < parsed.length) {
+        showMessage(`已跳过 ${parsed.length - valid.length} 条无效订阅源`)
+      }
       this.subscriptionList = JSON.parse(result) as rssSources[]
       this.isShowImport = true;
-    })
+    } catch (err) {
+      console.error('订阅源导入失败：' + JSON.stringify(err))
+      showMessage('订阅源文件解析失败，请检查 JSON 格式')
+    }
   }
 
   async pasteAnalyze() {
