@@ -1,10 +1,5 @@
 import { dataItem } from 'ets/componets/dataList/dataItem';
-import VersionUpdateCustomDialog from 'ets/componets/aboutUs/VersionUpdate';
 import { router } from '@kit.ArkUI';
-import { common, Want } from '@kit.AbilityKit';
-import { BusinessError } from '@ohos.base';
-import hilog from '@ohos.hilog';
-import { productViewManager } from '@kit.StoreKit';
 
 @Entry
 @Component
@@ -12,9 +7,7 @@ struct AboutUsPage {
   @StorageLink('bottomRectHeight') bottomRectHeight: number = 0
   @StorageLink('topRectHeight') topRectHeight: number = 0
   @State isShowQQ: boolean = false
-  @State version: string = "V1.0.0.1"
   @State first_list: dataItem[] = [
-    new dataItem("检查更新", 1),
     new dataItem("更新日志", 2),
     new dataItem("开发人员", 3),
   ];
@@ -24,13 +17,6 @@ struct AboutUsPage {
     new dataItem("免责声明", 3),
     new dataItem("崩溃日志", 4),
   ]
-  // 升级弹窗
-  dialogController: CustomDialogController = new CustomDialogController({
-    builder: VersionUpdateCustomDialog({}),
-    cornerRadius: 16,
-    gridCount: 3,
-    alignment: DialogAlignment.Center,
-  })
   @State qqList: Array<string> = [
     'Beta群:887615035'
 
@@ -39,31 +25,12 @@ struct AboutUsPage {
   firstUrl_list(value: number | string) {
     switch (value) {
       case 0:
-      // 升级弹窗
-      //   this.dialogController.open()
-      // 跳转到应用市场
-        try {
-          const request: Want = {
-            parameters: {
-              bundleName: 'com.legado.app'
-            }
-          };
-          productViewManager.loadProduct(getContext(this) as common.UIAbilityContext, request, {
-            onError: (error: BusinessError) => {
-              hilog.info(0, 'TAG', `loadProduct onError. code is ${error.code}, message is ${error.message}`);
-            }
-          });
-        } catch (err) {
-          hilog.error(0, 'TAG', `loadProduct failed. code is ${err.code}, message is ${err.message}`);
-        }
-        break
-      case 1:
       // 更新日志
         router.pushUrl({
           url: "pages/view/myCenter/aboutUs/versionLogPage"
         })
         break
-      case 2:
+      case 1:
       //todo 开发人员
         break
     }
@@ -128,7 +95,7 @@ struct AboutUsPage {
         .height(48)
         .width("100%")
 
-        this.middleClick(this.first_list, "app.media.right", this.version, "first")
+        this.middleClick(this.first_list, "app.media.right", null, "first")
 
         Grid() {
           GridItem() {
