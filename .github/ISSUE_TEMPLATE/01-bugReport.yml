@@ -1,0 +1,67 @@
+name: Bug 报告
+description: 报告 HarmonyOS 应用中的可复现问题
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我已搜索现有 Issue，确认没有重复报告
+          required: true
+        - label: 我使用的是最新可用版本，问题仍然存在
+          required: true
+        - label: 我已移除账号、书源和日志中的隐私信息
+          required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: 影响区域
+      options: [阅读器, 书源, 书架, 订阅/RSS, 漫画, 音频, 数据/同步, 构建/安装, 其他]
+    validations:
+      required: true
+  - type: dropdown
+    id: impact
+    attributes:
+      label: 影响程度
+      options: [功能异常, 界面异常, 性能问题, 崩溃/无法启动, 数据丢失或损坏, 兼容性问题]
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: 应用版本
+      placeholder: "例如 1.0.2.7"
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: HarmonyOS 版本、设备型号
+      placeholder: "例如 HarmonyOS 4.2 / Mate 60"
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: 问题描述
+      description: 请说明实际结果和期望结果。
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      placeholder: "1. 打开...\n2. 点击...\n3. 看到..."
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志或录屏
+      description: 请脱敏后粘贴日志，或拖入可公开分享的截图/录屏。
+  - type: textarea
+    id: additions
+    attributes:
+      label: 其他信息
