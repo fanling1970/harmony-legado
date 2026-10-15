@@ -1,11 +1,27 @@
 {
   "app": {
-    "signingConfigs": [],
+    "signingConfigs": [
+      {
+        "name": "default",
+        "type": "HarmonyOS",
+        "material": {
+          "certpath": "C:\\Users\\zghxi\\.ohos\\config\\default_harmony-legado_Tjzk68i4J-dfPGJBbrLIdsKbDJNymt1PMlTLeFnx7_E=.cer",
+          "keyAlias": "debugKey",
+          "keyPassword": "0000001BB89D92278CE58A2886593C3EDDAB38771CDEE29719F4B3205C8D9C84561386DFC1917D13199D5E",
+          "profile": "C:\\Users\\zghxi\\.ohos\\config\\default_harmony-legado_Tjzk68i4J-dfPGJBbrLIdsKbDJNymt1PMlTLeFnx7_E=.p7b",
+          "signAlg": "SHA256withECDSA",
+          "storeFile": "C:\\Users\\zghxi\\.ohos\\config\\default_harmony-legado_Tjzk68i4J-dfPGJBbrLIdsKbDJNymt1PMlTLeFnx7_E=.p12",
+          "storePassword": "0000001BDE64D400650B2AA406406CE83BFC85D429E1486D5110AD87928AC86B39D74D3D861763D201C168"
+        }
+      }
+    ],
     "products": [
       {
         "name": "default",
+        "signingConfig": "default",
         "compatibleSdkVersion": "5.0.4(16)",
         "runtimeOS": "HarmonyOS",
+        "targetSdkVersion": "5.0.4(16)"
       }
     ]
   },
